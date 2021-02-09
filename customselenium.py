@@ -1,177 +1,265 @@
-class CustomSelenium(object):
-    """docstring for xxx"""
-    def __init__(self, driver, config):
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+from selenium.webdriver.support import expected_conditions
+from selenium.webdriver.support.wait import WebDriverWait
+
+from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import InvalidCookieDomainException
+from selenium.common.exceptions import ElementNotInteractableException
+from selenium.common.exceptions import StaleElementReferenceException
+from selenium.common.exceptions import ElementClickInterceptedException # not clickable mouse
+from selenium.webdriver.common.action_chains import ActionChains # hovermous
+from colorama import init
+from termcolor import colored
+import pyotp
+import random
+import time
+import datetime
+import json # go fuck urself if you dont know
+import inspect # get current func name
+import re # regex module
+import calendar # chat unread module
+from datetime import date # chat unread module
+from dateutil.relativedelta import relativedelta # chat unread module
+from pprint import pprint # debug
+from configparser import ConfigParser # read ini file
+
+import pickle # cookies module
+from pathlib import Path # create dir
+
+"""
+
+Versi : 1.1 beta
+
+"""
+class CustomHelper(object):
+
+    def __init__(self, driver):
         self.driver = driver
-        self.config = config
-        self.init = config['init']
 
     def debug(self,text):
-        if self.config['init']['debug']:
-            print(text)
+        print('DEBUG : '+str(text))
 
     def go(self,url):
-        d={}
-        if self.driver.current_url != url:
-            self.debug('debug : load a url : '+url)
-            self.driver.get(url)
-        d['status'] = True
-        return d
+        driver = self.driver
+        if driver.current_url != url:
+            self.debug('load a url : '+url)
+            driver.get(url)
+        return True
 
-    def xpath_exist(self,xpath,driver=None):
-        d={}
-        d['input']={} # add dict inputted parameters
-        d['response']={}
-        d['comment']=[] # append object executing comment for debug
-        d['status']=False # bool function return
-        d['function']=inspect.currentframe().f_code.co_name # current function name
+    def cookies_save(self,name):
+        self.debug('save current cookies')
+        Path("cookies").mkdir(parents=True, exist_ok=True)
+        pickle.dump( self.driver.get_cookies() , open("cookies/"+name+".pkl","wb"))
 
-        d['input']['xpath'] = xpath
+    def cookies_load(self,name):
+        try:
+            file=Path("cookies/"+name+".pkl")
+            if not file.is_file():
+                return False
+            self.debug('load saved cookies')
+            self.driver.get('https://google.com')
+            # tambah validasi url sudah ada atau belum
+            cookies = pickle.load(open("cookies/"+name+".pkl", "rb"))
+            for cookie in cookies:
+                try:
+                    self.driver.add_cookie(cookie)
+                except InvalidCookieDomainException:
+                    self.debug('critical : invalid cookie domain')
+                    return False
+            return True
+        except FileNotFoundError:
+            return False
 
-        if not driver:
-            driver=self.driver
+class CustomSelenium(object):
+    """docstring for CustomSelenium"""
+    def __init__(self, driver, config=None):
+        self.driver = driver
+        if not config:
+            self.config = {
+                "timeout" : 10,
+                "debug" : True,
+                "delay" : 0.009,
+                "while":{
+                    "timeout" : 10,
+                    "delay" : 0.009,
+                    "retry" : 50
+                }
+            }
+        else:
+            self.config = config
+
+    def debug(self,text):
+        if self.config['debug']:
+            print('DEBUG : '+str(text))
+
+    def xpath_exist(self,xpath):
+        output={}
+        output['input']={} # add dictionary inputted parameters
+        output['response']={}
+        output['comment']=[] # append object executing comment for debug
+        output['status']=False # bool function return
+        
+        output['function']=inspect.currentframe().f_code.co_name # current function name
+        output['input']['xpath'] = xpath
+
+        driver=self.driver
         if isinstance(xpath,dict):
-            d['comment'].append('input is xpath')
+            output['comment'].append('input is xpath')
             for k,v in xpath.items():
                 out=self.xpath_exist(v)
+                output['response'][k]=out
                 if out['status']:
-                    d['comment'].append('key [ '+k+' ]')
-                    d['comment'].append('xpath [ '+v+' ]')
-                    d['status']=True
-                    break
-            return d
+                    return out
+            return output
         try:
             out=driver.find_element(By.XPATH, xpath)
-            d['response']['element']=out
-            d['status']=True
+            output['response']['element']=out
+            try:
+                output['response']['text']=out.text
+            except StaleElementReferenceException:
+                output['comment'].append('exception StaleElementReferenceException')
+                output['response']['text']=''
+            output['status']=True
         except NoSuchElementException:
-            d['status']=False
-        return d
+            output['comment'].append('element not found')
+        return output
 
-    def xpath_input(self,xpath,value,driver=None):
-        d={}
-        d['input']={} # add dict inputted parameters
-        d['response']={}
-        d['comment']=[] # append object executing comment for debug
-        d['status']=False # bool function return
-        d['function']=inspect.currentframe().f_code.co_name # current function name
+    def input(self,xpath,value):
+        output={}
+        output['input']={} # add dict inputted parameters
+        output['response']={}
+        output['comment']=[] # append object executing comment for debug
+        output['status']=False # bool function return
+        output['function']=inspect.currentframe().f_code.co_name # current function name
         
-        d['input']['xpath'] = xpath
-        d['input']['value'] = value
+        output['input']['xpath'] = xpath
+        output['input']['value'] = value
 
-        if not driver:
-            driver=self.driver
-        
+        driver=self.driver
         check=self.xpath_exist(xpath)
         if not check['status']:
-            d['comment'].append('element not found')
-            return d
+            output['comment'].append('element not found')
+            return output
         elem = check['response']['element']
-        if self.init['input']['delay']:
-            d['comment'].append('random delay on')
-            d['comment'].append('min '+str(self.init['input']['min']))
-            d['comment'].append('max '+str(self.init['input']['max']))
-            for s in value:
-                elem.send_keys(s)
-                time.sleep(random.uniform(self.init['input']['min'],self.init['input']['max']))
-        else:
-            elem.send_keys(value)
+        elem.send_keys(value)
         if elem.get_attribute('value') == value:
-            d['status']=True
-        print(d)
-        return d
+            output['status']=True
+        return output
 
-    def click(self,xpath,driver=None):
-        d={}
-        d['input']={} # add dict inputted parameters
-        d['response']={}
-        d['comment']=[] # append object executing comment for debug
-        d['status']=False # bool function return
-        d['function']=inspect.currentframe().f_code.co_name # current function name
+    def click(self,xpath,mouse=False):
+        output={}
+        output['input']={} # add dict inputted parameters
+        output['response']={}
+        output['comment']=[] # append object executing comment for debug
+        output['status']=False # bool function return
+        output['function']=inspect.currentframe().f_code.co_name # current function name
         
-        d['input']['xpath'] = xpath
+        output['input']['xpath'] = xpath
 
-        if not driver:
-            driver=self.driver
-        
+        driver=self.driver
         check=self.xpath_exist(xpath)
         if not check['status']:
-            d['comment'].append('element not found')
-            return d
+            output['comment'].append('element not found')
+            return output
         elem = check['response']['element']
-        
-        if self.init['click']['delay']:
-            d['comment'].append('random delay on')
-            d['comment'].append('min '+str(self.init['input']['min']))
-            d['comment'].append('max '+str(self.init['input']['max']))
-        d['comment'].append('try click')
+        output['comment'].append('try click')
         try:
-            driver.execute_script("arguments[0].click()",elem)
-            d['status']=True
+            if mouse:
+                output['comment'].append('try move mouse')
+                action = webdriver.ActionChains(driver)
+                action.move_to_element(elem)
+                action.perform()
+                elem.click()
+            else:
+                driver.execute_script("arguments[0].click()",elem)
+            output['status']=True
         except StaleElementReferenceException:
-            d['comment'].append('element not ready')
-        return d['status']
+            output['comment'].append('element not ready')
+        except ElementClickInterceptedException:
+            output['comment'].append('element not clickable')
+        return output
     
-    def force(self, f, *args, succ=[], err=[], skip_blank=True):
-        d={}
-        d['input']={} # add dict inputted parameters
-        d['response']={}
-        d['comment']=[] # append object executing comment for debug
-        d['status']=False # bool function return
-        d['function']=inspect.currentframe().f_code.co_name # current function name
+    def execute(self, func=None, *args, success=[], error=[], **kwargs):
+        if func:
+            func_name=func.__name__
+        else:
+            func_name=None
+        output={}
+        output['input']={} # add dict inputted parameters
+        output['response']={} # each func response
+        output['comment']=[] # append object executing comment for debug
+        output['status']=False # bool function return
+        output['function']=inspect.currentframe().f_code.co_name # current function name
 
         start = time.time()
         c_retry = 0
 
-        d['input']['f']=f
-        d['input']['args']=[*args,]
-        d['input']['succ']=succ
-        d['input']['err']=err
-        d['input']['succ']=succ
+        output['input']['func']=func_name
+        output['input']['args']=[*args,]
+        output['input']['kwargs']=kwargs
+        output['input']['success']=success
+        output['input']['error']=error
 
-        # self.debug('===================================================')
-        # self.debug('debug : force start '+str(f))
-        # self.debug('debug : force args list ')
-        # print(*args)
-        # self.debug('debug : force succ list '+str(succ))
-        # self.debug('debug : force err list '+str(err))
-        self.debug('====================================================================')
+        self.debug('start execute')
+        
         while True:
-            self.debug('debug : force in while loops')
-            try:
-                c = f(*args)
-            except ElementNotInteractableException:
-                continue
-            time.sleep(self.init['while']['delay'])
+            
+            c_retry +=1
+            str_retry = str(c_retry)
+            time.sleep(self.config['while']['delay'])
             end = time.time()
             elapsed = end - start
-            if succ:
-                self.debug('debug : force succ check is on')
-                chk = self.xpath_exist(succ)
-                if chk['status']:
-                    self.debug('debug : force succ check found success')
-                    d['status']=True
-                    break
-            if err:
-                self.debug('debug : force error check is on')
-                chk = self.xpath_exist(err)
-                if chk['status']:
-                    self.debug('debug : force error check found error')
-                    # if skip_blank:
-                    #     if chk.text == '':
-                    #         continue;
-                    # return False
-                    break
-            if not succ and not err:
-                self.debug('debug : force function return True')
-                d['status']=True
+            
+            if elapsed > self.config['while']['timeout']:
+                self.debug('execute while max timeout')
                 break
             
-            if elapsed > self.init['while']['timeout']:
-                self.debug('debug : force timeout')
+            if c_retry > self.config['while']['retry']:
+                self.debug('execute while max retry')
                 break
-            c_retry +=1
-            if c_retry > self.init['while']['retry']:
-                self.debug('debug : force max retry')
+
+            self.debug('debug : force in while loops')
+            
+            if func:
+                arg = ', '.join('\'{0}\''.format(w) for w in args)
+                kwarg = ', '.join('{}={}'.format(key, value) for key, value in kwargs.items())
+                output['comment'].append('execute run '+func_name+'('+arg+kwarg+')')
+                
+                run = func(*args,**kwargs)
+                print('execute run '+func_name+'('+arg+kwarg+')')
+                output['response'][str_retry]={}
+                output['response'][str_retry][func_name]=run
+
+            if success:
+                self.debug('execute success check is on')
+                check = self.xpath_exist(success)
+                if check['status']:
+                    output['response']['xpath_exist']=check
+                    self.debug('execute success check is true')
+                    output['status']=True
+                    break
+
+            if error:
+                self.debug('execute error check is on')
+                check = self.xpath_exist(error)
+                if check['status']:
+                    output['response']['xpath_exist']=check
+                    self.debug('execute error check is true')
+                    if chk['response']['text'] == '':
+                        continue;
+                    break
+
+            if not success and not error:
+                self.debug('execute has no validation')
+                if func:
+                    output['status']=run['status']
+                else:
+                    output['status']=True
                 break
-        self.debug('debug : force return end False')
-        return d
+
+        self.debug('end execute')
+        print(json.dumps(output,sort_keys=True, indent=4,default=lambda o: '<not serializable>'))
+        return output
